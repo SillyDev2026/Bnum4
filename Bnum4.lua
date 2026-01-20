@@ -40,7 +40,6 @@ function Bnum.read(val: any): (number, number)
 		if val == -math.huge then
 			return -1, math.huge
 		end
-
 		local absn = math.abs(val)
 		if absn >= 1e10 or absn <= 1e-10 then
 			local e = math.floor(math.log10(absn))
@@ -91,7 +90,6 @@ function Bnum.read(val: any): (number, number)
 			c = string.byte(val, i)
 			if c == 45 then esign = -1; i += 1
 			elseif c == 43 then i += 1 end
-
 			local e = 0
 			while i <= len do
 				c = string.byte(val, i)
@@ -209,7 +207,7 @@ function Bnum.fromString(str: string): buffer
 		buffer.writei32(out, 8, 0)
 		return out
 	end
-	local m = mant * (10 ^ -(mantDigits - 1))
+	local m = mant * (pow10[-(mantDigits - 1)])
 	buffer.writef64(out, 0, sign * m)
 	buffer.writei32(out, 8, exp + mantDigits - 1)
 	return out
@@ -346,7 +344,7 @@ end
 
 function Bnum.toNumber(buff: buffer): number
 	local man, exp = Bnum.read(buff)
-	return man * 10^exp
+	return man * pow10[exp]
 end
 
 function Bnum.add(val1: any, val2: any): buffer
@@ -1155,7 +1153,7 @@ function Bnum.pow(val1: any, val2: any): buffer
 	if powVal == math.huge then return Bnum.inf end
 	if powVal == -math.huge then return Bnum.zero end
 	local newE = math.floor(powVal)
-	local newM = 10^(powVal - newE)
+	local newM = pow10[(powVal - newE)]
 	if newM >= 10 then
 		newM = newM * 0.1
 		newE = newE + 1
@@ -1262,7 +1260,7 @@ function Bnum.pow10(val: any): buffer
 		return Bnum.zero
 	end
 	local newE = math.floor(total)
-	local newM = 10^(total - newE)
+	local newM = pow10[total-newE]
 	if newM >= 10 then
 		newM *= 0.1
 		newE += 1
@@ -1734,7 +1732,7 @@ function Bnum.random	(val1: any, val2: any): buffer
 	end
 	local rLog = minLog + math.random() * (maxLog - minLog)
 	local exp = math.floor(rLog)
-	local man = 10^(rLog-exp)
+	local man = pow10[rLog-exp]
 	local buff = buffer.create(12)
 	buffer.writef64(buff, 0, man)
 	buffer.writei32(buff, 8, exp)
@@ -4159,11 +4157,11 @@ function Bnum.lbdecode(encodedBuf: buffer): buffer
 		local absMan = math.abs(man)
 		if absMan >= 10 then
 			local delta = math.floor(math.log10(absMan))
-			man = man / (10^delta)
+			man = man / pow10[delta]
 			exp = exp + delta
 		elseif absMan < 1 then
 			local delta = math.floor(math.log10(absMan))
-			man = man / (10^delta)
+			man = man / pow10[delta]
 			exp = exp + delta
 		end
 	end
@@ -4201,7 +4199,7 @@ function Bnum.Comma(val: any, digits: number?): string
 	if type(val) ~= "number" then
 		val = Bnum.toNumber(val)
 	end
-	local factor = 10^digits
+	local factor = pow10[digits]
 	val = math.floor(val * factor + 0.001) / factor
 	local intPart, fracPart = tostring(val):match("^(%-?%d+)%.?(%d*)$")
 	intPart = intPart:reverse():gsub("(%d%d%d)", "%1,"):reverse()
@@ -4288,7 +4286,7 @@ function Bnum.format(val: any, digits: number?): string
 	if e < 3000 then
 		if e <= -3 then
 			local index = math.floor(-e / 3)
-			m = math.floor(m * 10^digits + 0.5) / 10^digits
+			m = math.floor(m * pow10[digits] + 0.5) / pow10[digits]
 			if index <= 3 then
 				return "1/" .. m .. (first[index + 1] or "")
 			else
@@ -4300,14 +4298,14 @@ function Bnum.format(val: any, digits: number?): string
 		end
 		if e < 3 then
 			local num = m * pow10[e]
-			local factor = 10^digits
+			local factor = pow10[digits]
 			num = math.floor(num * factor + 0.5) / factor
 			return tostring(num)
 		end
 		local index = math.floor(e / 3)
 		local rem = e % 3
 		local scaled = m * pow10[rem]
-		scaled = math.floor(scaled * 10^digits + 0.5) / (10^digits)
+		scaled = math.floor(scaled * pow10[digits] + 0.5) / pow10[digits]
 		if index <= 3 then
 			return scaled .. (first[index + 1] or "")
 		else
@@ -4329,7 +4327,7 @@ function Bnum.format(val: any, digits: number?): string
 		local index = math.floor(eExp / 3)
 		local rem = eExp % 3
 		local scaled = eMan * pow10[rem]
-		scaled = math.floor(scaled * 10^digits + 0.5) / (10^digits)
+		scaled = math.floor(scaled * pow10[digits] + 0.5) / pow10[digits]
 		if index <= 3 then
 			expStr = scaled .. (first[index + 1] or "")
 		else
