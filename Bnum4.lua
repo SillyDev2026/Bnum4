@@ -127,14 +127,8 @@ function Bnum.fromNumber(n: number): buffer
 		buffer.writei32(buf, 8, 1)
 		return buf
 	end
-	local man, exp
-	if n >= 1e10 or n <= -1e10 or (n > 0 and n < 1e-10) or (n < 0 and n > -1e-10) then
-		exp = math.floor(math.log10(math.abs(n)))
-		man = n / pow10[exp]
-	else
-		man = n
-		exp = 0
-	end
+	local exp = math.floor(math.log10(n))
+	local man = n/pow10[exp]
 	buffer.writef64(buf, 0, man)
 	buffer.writei32(buf, 8, exp)
 	return buf
@@ -503,15 +497,9 @@ function Bnum.add(val1: any, val2: any): buffer
 	end
 	local m = m1 + m2
 	if m == 0 then return Bnum.zero end
-	local e = e1
 	local am = math.abs(m)
-	if am >= 10 then
-		m *= 0.1
-		e += 1
-	elseif am < 1 then
-		m *= 10
-		e -= 1
-	end
+	local e = math.floor(math.log10(m))
+	m /= pow10[e]
 	local out = buffer.create(12)
 	buffer.writef64(out, 0, m)
 	buffer.writei32(out, 8, e)
@@ -674,17 +662,11 @@ function Bnum.sub(val1: any, val2: any): buffer
 	if m <= 0 then
 		return Bnum.zero
 	end
-	local am = math.abs(m)
-	if am >= 10 then
-		m *= 0.1
-		e += 1
-	elseif am < 1 then
-		m *= 10
-		e -= 1
-	end
+	local exp = math.floor(math.log10(m))
+	local man = m/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, m)
-	buffer.writei32(out, 8, e)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -806,14 +788,11 @@ function Bnum.mul(val1: any, val2: any): buffer
 	local m = m1 * m2
 	local e = e1 + e2
 	local am = math.abs(m)
-	if am >= 10 or am < 1 then
-		local delta = math.floor(math.log10(am))
-		m = m / pow10[delta]
-		e = e + delta
-	end
+	local exp = math.floor(math.log10(m))
+	local man = m/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, m)
-	buffer.writei32(out, 8, e)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -1010,14 +989,11 @@ function Bnum.div(val1: any, val2: any): buffer
 	local m = m1 / m2
 	local e = e1 - e2
 	local am = math.abs(m)
-	if am >= 10 or am < 1 then
-		local delta = math.floor(math.log10(am))
-		m = m / pow10[delta]
-		e = e + delta
-	end
+	local exp = math.floor(math.log10(m))
+	local man = m/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, m)
-	buffer.writei32(out, 8, e)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -1153,17 +1129,12 @@ function Bnum.pow(val1: any, val2: any): buffer
 	if powVal == math.huge then return Bnum.inf end
 	if powVal == -math.huge then return Bnum.zero end
 	local newE = math.floor(powVal)
-	local newM = pow10[(powVal - newE)]
-	if newM >= 10 then
-		newM = newM * 0.1
-		newE = newE + 1
-	elseif newM < 1 then
-		newM = newM * 10
-		newE = newE - 1
-	end
+	local newM = 10^(powVal - newE)
+	local exp = math.floor(math.log10(newM))
+	local man = newM/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, newM)
-	buffer.writei32(out, 8, newE)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -1261,16 +1232,11 @@ function Bnum.pow10(val: any): buffer
 	end
 	local newE = math.floor(total)
 	local newM = pow10[total-newE]
-	if newM >= 10 then
-		newM *= 0.1
-		newE += 1
-	elseif newM > 0 and newM < 1 then
-		newM *= 10
-		newE -= 1
-	end
+	local exp = math.floor(math.log10(newM))
+	local man = newM/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, newM)
-	buffer.writei32(out, 8, newE)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -1369,8 +1335,10 @@ function Bnum.ln(val: any): buffer
 		return buf
 	end
 	local result = math.log(m) + e * 2.302585092994046
-	buffer.writef64(buf, 0, result)
-	buffer.writei32(buf, 8, 0)
+	local exp = math.floor(math.log10(result))
+	local man = result/pow10[exp]
+	buffer.writef64(buf, 0, man)
+	buffer.writei32(buf, 8, exp)
 	return buf
 end
 
@@ -1469,8 +1437,10 @@ function Bnum.log10(val: any): buffer
 		return buf
 	end
 	local result = math.log10(m) + e
-	buffer.writef64(buf, 0, result)
-	buffer.writei32(buf, 8, 0)
+	local exp = math.floor(math.log10(result))
+	local man = result/pow10[exp]
+	buffer.writef64(buf, 0, man)
+	buffer.writei32(buf, 8, exp)
 	return buf
 end
 
@@ -1607,8 +1577,10 @@ function Bnum.log	(val1: any, val2: any): buffer
 		return buf
 	end
 	local result = (math.log(m1) + e1 * 2.302585092994046) / (math.log(m2) + e2 * 2.302585092994046)
-	buffer.writef64(buf, 0, result)
-	buffer.writei32(buf, 8, 0)
+	local exp = math.floor(math.log10(result))
+	local man = result/pow10[exp]
+	buffer.writef64(buf, 0, man)
+	buffer.writei32(buf, 8, exp)
 	return buf
 end
 
@@ -1732,7 +1704,7 @@ function Bnum.random	(val1: any, val2: any): buffer
 	end
 	local rLog = minLog + math.random() * (maxLog - minLog)
 	local exp = math.floor(rLog)
-	local man = pow10[rLog-exp]
+	local man = 10^rLog-exp
 	local buff = buffer.create(12)
 	buffer.writef64(buff, 0, man)
 	buffer.writei32(buff, 8, exp)
@@ -2956,16 +2928,11 @@ function Bnum.sqrt(val: any): buffer
 	end
 	local newMan = math.sqrt(m)
 	local newExp = e / 2
-	if newMan >= 10 then
-		newMan *= 0.1
-		newExp += 1
-	elseif newMan > 0 and newMan < 1 then
-		newMan *= 10
-		newExp -= 1
-	end
+	local exp = math.floor(math.log10(newMan))
+	local man = newMan/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, newMan)
-	buffer.writei32(out, 8, newExp)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -3053,29 +3020,29 @@ function Bnum.cbrt(val: any): buffer
 	m = math.abs(m)
 	local newMan = sign * m^(1/3)
 	local newExp = e / 3
-	if newMan >= 10 then
-		newMan *= 0.1
-		newExp += 1
-	elseif newMan > 0 and newMan < 1 then
-		newMan *= 10
-		newExp -= 1
-	end
+	local exp = math.floor(math.log10(newMan))
+	local man = newMan/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, newMan)
-	buffer.writei32(out, 8, newExp)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
 function Bnum.root(val: any, n: any): buffer
 	local out = buffer.create(12)
-	local m1: number, e1: number
+	local m1: number, e1: number = 0/0, 0
+	local m2: number, e2: number = 0/0, 0
 	if type(val) == "buffer" then
 		m1, e1 = buffer.readf64(val, 0), buffer.readi32(val, 8)
 	elseif type(val) == "number" then
-		if val == 0 then m1, e1 = 0, 0
-		elseif val ~= val then m1, e1 = 0/0, 0
-		elseif val == math.huge then m1, e1 = 1, math.huge
-		elseif val == -math.huge then m1, e1 = -1, math.huge
+		if val == 0 then
+			m1, e1 = 0, 0
+		elseif val ~= val then
+			m1, e1 = 0/0, 0
+		elseif val == math.huge then
+			m1, e1 = 1, math.huge
+		elseif val == -math.huge then
+			m1, e1 = -1, math.huge
 		else
 			local a = math.abs(val)
 			if a >= 1e10 or a <= 1e-10 then
@@ -3091,12 +3058,12 @@ function Bnum.root(val: any, n: any): buffer
 			m1, e1 = 0/0, 0
 		else
 			local i, sign = 1, 1
+			local mant, mantDigits, exp = 0, 0, 0
+			local frac = false
 			local b = string.byte
 			local c = b(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
 			while i <= len do
 				c = b(val, i)
 				if c >= 48 and c <= 57 then
@@ -3139,14 +3106,17 @@ function Bnum.root(val: any, n: any): buffer
 			end
 		end
 	end
-	local m2: number, e2: number
 	if type(n) == "buffer" then
 		m2, e2 = buffer.readf64(n, 0), buffer.readi32(n, 8)
 	elseif type(n) == "number" then
-		if n == 0 then m2, e2 = 0, 0
-		elseif n ~= n then m2, e2 = 0/0, 0
-		elseif n == math.huge then m2, e2 = 1, math.huge
-		elseif n == -math.huge then m2, e2 = -1, math.huge
+		if n == 0 then
+			m2, e2 = 0, 0
+		elseif n ~= n then
+			m2, e2 = 0/0, 0
+		elseif n == math.huge then
+			m2, e2 = 1, math.huge
+		elseif n == -math.huge then
+			m2, e2 = -1, math.huge
 		else
 			local a = math.abs(n)
 			if a >= 1e10 or a <= 1e-10 then
@@ -3162,12 +3132,13 @@ function Bnum.root(val: any, n: any): buffer
 			m2, e2 = 0/0, 0
 		else
 			local i, sign = 1, 1
+			local mant, mantDigits, exp = 0, 0, 0
+			local frac = false
 			local b = string.byte
+
 			local c = b(n, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
 			while i <= len do
 				c = b(n, i)
 				if c >= 48 and c <= 57 then
@@ -3210,7 +3181,7 @@ function Bnum.root(val: any, n: any): buffer
 			end
 		end
 	end
-	if m1 < 0 then
+	if m1 < 0 or m1 ~= m1 or m2 ~= m2 then
 		buffer.writef64(out, 0, 0/0)
 		buffer.writei32(out, 8, 0)
 		return out
@@ -3224,16 +3195,12 @@ function Bnum.root(val: any, n: any): buffer
 	local invN = 1 / (m2 * pow10[e2])
 	local newLog = logv * invN
 	local ne = math.floor(newLog)
-	local nm = pow10[newLog - ne]
-	if nm >= 10 then
-		nm *= 0.1
-		ne += 1
-	elseif nm > 0 and nm < 1 then
-		nm *= 10
-		ne -= 1
-	end
-	buffer.writef64(out, 0, nm)
-	buffer.writei32(out, 8, ne)
+	local nm = 10^(newLog-ne)
+
+	local exp = math.floor(math.log10(nm))
+	local man = nm/pow10[exp]
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -3363,7 +3330,6 @@ function Bnum.min<T...>(...: T...): buffer
 	if #args == 0 then
 		error("Bnum.min: expected at least one argument")
 	end
-
 	local out = buffer.create(12)
 	local bestMan: number, bestExp: number
 	for i = 1, #args do
@@ -3445,7 +3411,6 @@ function Bnum.min<T...>(...: T...): buffer
 		else
 			error("Bnum.min: invalid argument type")
 		end
-
 		if i == 1 then
 			bestMan, bestExp = m, e
 		else
@@ -3454,7 +3419,6 @@ function Bnum.min<T...>(...: T...): buffer
 			end
 		end
 	end
-
 	buffer.writef64(out, 0, bestMan)
 	buffer.writei32(out, 8, bestExp)
 	return out
@@ -3817,7 +3781,6 @@ function Bnum.modf(val: any): (buffer, buffer)
 		local intFloor = (intM >= 0) and math.floor(intM) or math.ceil(intM)
 		intE = math.floor(math.log10(math.abs(intFloor)))
 		intM = intFloor / pow10[intE]
-
 		fracM = m * pow10[e] - intFloor
 		if fracM == 0 then
 			fracE, fracM = 0, 0
@@ -4063,9 +4026,11 @@ function Bnum.slog(val: any): buffer
 	end
 	local newM = total
 	local newE = count
+	local exp = math.floor(math.log10(newM))
+	local man = newM/pow10[exp]
 	local out = buffer.create(12)
-	buffer.writef64(out, 0, newM)
-	buffer.writei32(out, 8, newE)
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
 	return out
 end
 
@@ -4340,4 +4305,4 @@ function Bnum.format(val: any, digits: number?): string
 	return "E" .. expStr
 end
 
-return Bnum
+return table.freeze(Bnum)
