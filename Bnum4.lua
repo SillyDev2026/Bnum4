@@ -4293,9 +4293,10 @@ function Bnum.format(val: any, digits: number?): string
 			if index <= 3 then
 				return "1/" .. m .. (first[index + 1] or "")
 			else
-				local a = index % 10
-				local b = (index // 10) % 10
-				local c = (index // 100) % 10
+				local ind = index-1
+				local a = ind % 10
+				local b = (ind // 10) % 10
+				local c = (ind // 100) % 10
 				return "1/" .. m .. firstset[a + 1] .. second[b + 1] .. third[c + 1]
 			end
 		end
@@ -4312,9 +4313,10 @@ function Bnum.format(val: any, digits: number?): string
 		if index <= 3 then
 			return scaled .. (first[index + 1] or "")
 		else
-			local a = index % 10
-			local b = (index // 10) % 10
-			local c = (index // 100) % 10
+			local ind = index-1
+			local a = ind % 10
+			local b = (ind // 10) % 10
+			local c = (ind // 100) % 10
 			return scaled .. firstset[a + 1] .. second[b + 1] .. third[c + 1]
 		end
 	end
@@ -4334,9 +4336,10 @@ function Bnum.format(val: any, digits: number?): string
 		if index <= 3 then
 			expStr = scaled .. (first[index + 1] or "")
 		else
-			local a = index % 10
-			local b = (index // 10) % 10
-			local c = (index // 100) % 10
+			local ind = index-1
+			local a = ind % 10
+			local b = (ind // 10) % 10
+			local c = (ind // 100) % 10
 			expStr = scaled .. firstset[a + 1] .. second[b + 1] .. third[c + 1]
 		end
 	end
