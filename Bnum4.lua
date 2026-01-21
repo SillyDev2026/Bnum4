@@ -1444,144 +1444,182 @@ function Bnum.log10(val: any): buffer
 	return buf
 end
 
-function Bnum.log	(val1: any, val2: any): buffer
-	val1, val2 = convert(val1), convert(val2)
-	local m1: number, e1: number
-	local m2: number, e2: number
+function Bnum.log(val1: any, val2: any): buffer
+	local out = buffer.create(12)
+	local m1: number, e1: number = 0/0, 0
+	local m2: number, e2: number = 0/0, 0
 	if type(val1) == "buffer" then
 		m1, e1 = buffer.readf64(val1, 0), buffer.readi32(val1, 8)
 	elseif type(val1) == "number" then
-		if val1 == 0 then m1, e1 = 0,0
-		elseif val1 ~= val1 then m1, e1 = 0/0,0
-		elseif val1 == math.huge then m1, e1 = 1, math.huge
-		elseif val1 == -math.huge then m1, e1 = -1, math.huge
+		if val1 == 0 then
+			m1, e1 = 0, 0
+		elseif val1 ~= val1 then
+			m1, e1 = 0/0, 0
+		elseif val1 == math.huge then
+			m1, e1 = 1, math.huge
+		elseif val1 == -math.huge then
+			m1, e1 = -1, math.huge
 		else
-			local absn = math.abs(val1)
-			if absn >= 1e10 or absn <= 1e-10 then
-				local e = math.floor(math.log10(absn))
-				m1, e1 = val1 / pow10[e], e
+			local a = math.abs(val1)
+			if a >= 1e10 or a <= 1e-10 then
+				local ee = math.floor(math.log10(a))
+				m1, e1 = val1 / pow10[ee], ee
 			else
 				m1, e1 = val1, 0
 			end
 		end
 	elseif type(val1) == "string" then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
+		if len == 0 then
+			m1, e1 = 0/0, 0
+		else
+			local i, sign = 1, 1
+			local mant, mantDigits, exp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						exp += 1
+					end
+					if frac then exp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					i += 1
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			if i <= len then
+				local esign, ee = 1, 0
+				c = b(val1, i)
+				if c == 45 then esign = -1; i += 1
+				elseif c == 43 then i += 1 end
+				while i <= len do
+					c = b(val1, i)
+					if c < 48 or c > 57 then break end
+					ee = ee * 10 + (c - 48)
+					i += 1
+				end
+				exp += ee * esign
+			end
+			if mant == 0 then
+				m1, e1 = 0, 0
+			else
+				m1 = sign * mant * pow10[-(mantDigits - 1)]
+				e1 = exp + mantDigits - 1
+			end
 		end
 	end
-	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
+	if m1 <= 0 or m1 ~= m1 then
+		buffer.writef64(out, 0, 0/0)
+		buffer.writei32(out, 8, 0)
+		return out
+	end
+	if val2 == nil then
+		local ln = math.log(m1) + e1 * 2.302585092994046
+		buffer.writef64(out, 0, ln)
+		buffer.writei32(out, 8, 0)
+		return out
+	end
 	if type(val2) == "buffer" then
 		m2, e2 = buffer.readf64(val2, 0), buffer.readi32(val2, 8)
 	elseif type(val2) == "number" then
-		if val2 == 0 then m2, e2 = 0,0
-		elseif val2 ~= val2 then m2, e2 = 0/0,0
-		elseif val2 == math.huge then m2, e2 = 1, math.huge
-		elseif val2 == -math.huge then m2, e2 = -1, math.huge
+		if val2 == 0 then
+			m2, e2 = 0, 0
+		elseif val2 ~= val2 then
+			m2, e2 = 0/0, 0
+		elseif val2 == math.huge then
+			m2, e2 = 1, math.huge
+		elseif val2 == -math.huge then
+			m2, e2 = -1, math.huge
 		else
-			local absn = math.abs(val2)
-			if absn >= 1e10 or absn <= 1e-10 then
-				local e = math.floor(math.log10(absn))
-				m2, e2 = val2 / pow10[e], e
+			local a = math.abs(val2)
+			if a >= 1e10 or a <= 1e-10 then
+				local ee = math.floor(math.log10(a))
+				m2, e2 = val2 / pow10[ee], ee
 			else
 				m2, e2 = val2, 0
 			end
 		end
 	elseif type(val2) == "string" then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
+		if len == 0 then
+			m2, e2 = 0/0, 0
+		else
+			local i, sign = 1, 1
+			local mant, mantDigits, exp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						exp += 1
+					end
+					if frac then exp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					i += 1
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			if i <= len then
+				local esign, ee = 1, 0
+				c = b(val2, i)
+				if c == 45 then esign = -1; i += 1
+				elseif c == 43 then i += 1 end
+				while i <= len do
+					c = b(val2, i)
+					if c < 48 or c > 57 then break end
+					ee = ee * 10 + (c - 48)
+					i += 1
+				end
+				exp += ee * esign
+			end
+			if mant == 0 then
+				m2, e2 = 0, 0
+			else
+				m2 = sign * mant * pow10[-(mantDigits - 1)]
+				e2 = exp + mantDigits - 1
+			end
 		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
-		end
-	end
-	local buf = buffer.create(12)
-	if m1 <= 0 or m1 ~= m1 then
-		buffer.writef64(buf, 0, 0/0)
-		buffer.writei32(buf, 8, 0)
-		return buf
-	end
-	if not val2 then
-		local result = math.log(m1) + e1 * 2.302585092994046
-		buffer.writef64(buf, 0, result)
-		buffer.writei32(buf, 8, 0)
-		return buf
 	end
 	if m2 <= 0 or m2 ~= m2 then
-		buffer.writef64(buf, 0, 0/0)
-		buffer.writei32(buf, 8, 0)
-		return buf
+		buffer.writef64(out, 0, 0/0)
+		buffer.writei32(out, 8, 0)
+		return out
 	end
-	local result = (math.log(m1) + e1 * 2.302585092994046) / (math.log(m2) + e2 * 2.302585092994046)
+	local ln1 = math.log(m1) + e1 * 2.302585092994046
+	local ln2 = math.log(m2) + e2 * 2.302585092994046
+	local result = ln1 / ln2
 	local exp = math.floor(math.log10(result))
-	local man = result/pow10[exp]
-	buffer.writef64(buf, 0, man)
-	buffer.writei32(buf, 8, exp)
-	return buf
+	local man = result / 10^exp
+	buffer.writef64(out, 0, man)
+	buffer.writei32(out, 8, exp)
+	return out
 end
 
 function Bnum.random	(val1: any, val2: any): buffer
