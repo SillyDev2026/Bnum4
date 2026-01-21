@@ -48,62 +48,72 @@ function Bnum.read(val: any): (number, number)
 		return val, 0
 	end
 	if type(val) == "string" then
+		local out = buffer.create(12)
 		local len = #val
 		if len == 0 then
 			return 0/0, 0
-		end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val, i)
-		if c == 45 then
-			sign = -1; i += 1
-		elseif c == 43 then
-			i += 1
-		end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		while i <= len do
-			c = string.byte(val, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 101 or c == 69 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = string.byte(val, i)
-			if c == 45 then esign = -1; i += 1
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = string.byte(val, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				c = b(val, i)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				return 0, 0
+			else
+				return sign * mant * pow10[-(mantDigits - 1)], sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then
-			return 0, 0
-		end
-		local m = mant * pow10[-(mantDigits - 1)]
-		return sign * m, exp + mantDigits - 1
 	end
 	error("Bnum.read: invalid type autocorrected to zero")
 	return 0, 0
@@ -137,73 +147,74 @@ end
 function Bnum.fromString(str: string): buffer
 	local out = buffer.create(12)
 	local len = #str
+	local m, e
 	if len == 0 then
-		buffer.writef64(out, 0, 0/0)
-		buffer.writei32(out, 8, 0)
-		return out
-	end
-	local i = 1
-	local sign = 1
-	local c = string.byte(str, i)
-	if c == 45 then
-		sign = -1
-		i += 1
-	elseif c == 43 then
-		i += 1
-	end
-	local mant = 0
-	local mantDigits = 0
-	local exp = 0
-	local frac = false
-	while i <= len do
-		c = string.byte(str, i)
-		if c >= 48 and c <= 57 then
-			if mantDigits < 17 then
-				mant = mant * 10 + (c - 48)
-				mantDigits += 1
-			else
-				exp += 1
-			end
-			if frac then
-				exp -= 1
-			end
-		elseif c == 46 then
-			if frac then break end
-			frac = true
-		elseif c == 101 or c == 69 then
-			i += 1
-			break
-		else
-			break
-		end
-		i += 1
-	end
-	if i <= len then
-		local esign = 1
-		c = string.byte(str, i)
-		if c == 45 then
-			esign = -1
-			i += 1
-		elseif c == 43 then
-			i += 1
-		end
-		local e = 0
+		m, e = 0/0, 0
+	else
+		local i = 1
+		local sign = 1
+		local c = string.byte(str, i)
+		if c == 45 then sign = -1; i += 1
+		elseif c == 43 then i += 1 end
+		local mant, mantDigits, sexp = 0, 0, 0
+		local frac = false
+		local b = string.byte
 		while i <= len do
-			c = string.byte(str, i)
-			if c < 48 or c > 57 then break end
-			e = e * 10 + (c - 48)
+			c = b(str, i)
+			if c >= 48 and c <= 57 then
+				if mantDigits < 17 then
+					mant = mant * 10 + (c - 48)
+					mantDigits += 1
+				else
+					sexp += 1
+				end
+				if frac then sexp -= 1 end
+			elseif c == 46 then
+				if frac then break end
+				frac = true
+			elseif c == 69 or c == 101 then
+				break
+			else
+				break
+			end
 			i += 1
 		end
-		exp += e * esign
+		local function parseExp(idx)
+			local expVal, expSign = 0, 1
+			if idx > len then return 0, idx end
+			local c = b(str, idx)
+			if c == 45 then expSign = -1; idx += 1
+			elseif c == 43 then idx += 1 end
+			while idx <= len do
+				c = b(str, idx)
+				if c < 48 or c > 57 then break end
+				expVal = expVal * 10 + (c - 48)
+				idx += 1
+			end
+			if idx <= len and (b(str, idx) == 69 or b(str, idx) == 101) then
+				local innerExp, newIdx = parseExp(idx + 1)
+				expVal = expVal * 10^innerExp
+				idx = newIdx
+			end
+			return expVal * expSign, idx
+		end
+		while i <= len do
+			c = b(str, i)
+			if c ~= 69 and c ~= 101 then break end
+			i += 1
+			local expVal
+			expVal, i = parseExp(i)
+			sexp = expVal
+		end
+		if mant == 0 then
+			m, e = 0, 0
+		else
+			m = sign * mant * pow10[-(mantDigits - 1)]
+			e = sexp + mantDigits - 1
+		end
 	end
-	if mant == 0 then
-		buffer.writef64(out, 0, 0)
-		buffer.writei32(out, 8, 0)
-		return out
-	end
-	local m = mant * (pow10[-(mantDigits - 1)])
-	buffer.writef64(out, 0, sign * m)
-	buffer.writei32(out, 8, exp + mantDigits - 1)
+	buffer.writef64(out, 0, m)
+	buffer.writei32(out, 8, e)
 	return out
 end
 
@@ -243,75 +254,73 @@ function convert(val: any): buffer
 		buffer.writei32(b, 8, exp)
 		return b
 	elseif type(val) == 'string' then
-		local out = buffer.create(12)
 		local len = #val
+		local m, e
 		if len == 0 then
-			buffer.writef64(out, 0, 0/0)
-			buffer.writei32(out, 8, 0)
-			return out
-		end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val, i)
-		if c == 45 then
-			sign = -1
-			i += 1
-		elseif c == 43 then
-			i += 1
-		end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		while i <= len do
-			c = string.byte(val, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then
-					exp -= 1
-				end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 101 or c == 69 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = string.byte(val, i)
-			if c == 45 then
-				esign = -1
-				i += 1
-			elseif c == 43 then
-				i += 1
-			end
-			local e = 0
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
+			if c == 45 then sign = -1; i += 1
+			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = string.byte(val, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				c = b(val, i)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then
-			buffer.writef64(out, 0, 0)
-			buffer.writei32(out, 8, 0)
-			return out
-		end
-		buffer.writef64(out, 0, sign * mant * (pow10[-(mantDigits - 1)]))
-		buffer.writei32(out, 8, exp + mantDigits - 1)
-		return out
 	end
 	local out = buffer.create(12)
 	warn(`Failed to convert to buffer corrected to {out}`)
@@ -360,58 +369,74 @@ function Bnum.add(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		if len == 0 then m1, e1 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val1, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then m1, e1= 0,0 end
-		local m = mant * pow10[-(mantDigits-1)]
-		m1, e1 = sign * m, exp + mantDigits - 1
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
 	if type(val2) == "buffer" then
@@ -430,57 +455,74 @@ function Bnum.add(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		if len == 0 then m2, e2 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val2, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then m2, e2 = 0,0 end
-		local m = mant * pow10[-(mantDigits-1)]
-		m2, e2 = sign * m, exp + mantDigits - 1
 	end
 	if m2 == nil or e2 == nil then m2, e2 = 0,0 end
 	if m1 == 0 then return Bnum.new(m2,e2) end
@@ -525,57 +567,74 @@ function Bnum.sub(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		if len == 0 then m1, e1 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val1, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then m1, e1= 0,0 end
-		local m = mant * pow10[-(mantDigits-1)]
-		m1, e1 = sign * m, exp + mantDigits - 1
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
 	if type(val2) == "buffer" then
@@ -594,57 +653,74 @@ function Bnum.sub(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		if len == 0 then m2, e2 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val2, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant = 0
-		local mantDigits = 0
-		local exp = 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
-		if mant == 0 then m2, e2 = 0,0 end
-		local m = mant * pow10[-(mantDigits-1)]
-		m2, e2 = sign * m, exp + mantDigits - 1
 	end
 	if m2 == nil or e2 == nil then m2, e2 = 0,0 end
 	local de = e1 - e2
@@ -689,43 +765,73 @@ function Bnum.mul(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e * 10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -745,43 +851,73 @@ function Bnum.mul(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m2 == nil or e2 == nil then m2, e2 = 0,0 end
@@ -796,61 +932,90 @@ function Bnum.mul(val1: any, val2: any): buffer
 	return out
 end
 
-function Bnum.recip(val1: any): buffer
+function Bnum.recip(val: any): buffer
 	local m: number, e: number
-	if type(val1) == "buffer" then
-		m, e = buffer.readf64(val1, 0), buffer.readi32(val1, 8)
-	elseif type(val1) == "number" then
-		if val1 == 0 then m, e = 0,0
-		elseif val1 ~= val1 then m, e = 0/0,0
-		elseif val1 == math.huge then m, e = 1, math.huge
-		elseif val1 == -math.huge then m, e = -1, math.huge
+	if type(val) == "buffer" then
+		m, e = buffer.readf64(val, 0), buffer.readi32(val, 8)
+	elseif type(val) == "number" then
+		if val == 0 then m, e = 0,0
+		elseif val ~= val then m, e = 0/0,0
+		elseif val == math.huge then m, e = 1, math.huge
+		elseif val == -math.huge then m, e = -1, math.huge
 		else
-			local absn = math.abs(val1)
+			local absn = math.abs(val)
 			if absn >= 1e10 or absn <= 1e-10 then
 				local expv = math.floor(math.log10(absn))
-				m, e = val1 / pow10[expv], expv
+				m, e = val / pow10[expv], expv
 			else
-				m, e = val1, 0
+				m, e = val, 0
 			end
 		end
-	elseif type(val1) == "string" then
-		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if b(val1,i) == 45 then sign = -1; i += 1
-		elseif b(val1,i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1,i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1,i)
-			if c == 45 then esign = -1; i += 1
+	elseif type(val) == "string" then
+		local len = #val
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e2 = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = b(val1,i)
-				if c < 48 or c > 57 then break end
-				e2 = e2*10 + (c-48)
+				c = b(val, i)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e2 * esign
-		end
-		if mant == 0 then m, e = 0,0
-		else
-			local m2 = mant * pow10[-(mantDigits-1)]
-			m, e = sign * m2, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m == nil or e == nil then m, e = 0,0 end
@@ -888,43 +1053,73 @@ function Bnum.div(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -944,43 +1139,73 @@ function Bnum.div(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m2 == nil or e2 == nil then m2, e2 = 0,0 end
@@ -1016,43 +1241,73 @@ function Bnum.pow(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -1072,43 +1327,73 @@ function Bnum.pow(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == 0 then return (m2 == 0 and Bnum.one or Bnum.zero) end
@@ -1170,9 +1455,7 @@ function Bnum.pow10(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -1182,39 +1465,51 @@ function Bnum.pow10(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -1272,9 +1567,7 @@ function Bnum.ln(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -1284,39 +1577,51 @@ function Bnum.ln(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -1374,9 +1679,7 @@ function Bnum.log10(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -1386,39 +1689,51 @@ function Bnum.log10(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -1473,13 +1788,14 @@ function Bnum.log(val1: any, val2: any): buffer
 		if len == 0 then
 			m1, e1 = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
-			local b = string.byte
-			local c = b(val1, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
 				if c >= 48 and c <= 57 then
@@ -1487,38 +1803,51 @@ function Bnum.log(val1: any, val2: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val1, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val1, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m1, e1 = 0, 0
 			else
 				m1 = sign * mant * pow10[-(mantDigits - 1)]
-				e1 = exp + mantDigits - 1
+				e1 = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -1558,13 +1887,14 @@ function Bnum.log(val1: any, val2: any): buffer
 		if len == 0 then
 			m2, e2 = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
-			local b = string.byte
-			local c = b(val2, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
 				if c >= 48 and c <= 57 then
@@ -1572,38 +1902,51 @@ function Bnum.log(val1: any, val2: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val2, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val2, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m2, e2 = 0, 0
 			else
 				m2 = sign * mant * pow10[-(mantDigits - 1)]
-				e2 = exp + mantDigits - 1
+				e2 = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -1641,43 +1984,73 @@ function Bnum.random	(val1: any, val2: any): buffer
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -1697,43 +2070,73 @@ function Bnum.random	(val1: any, val2: any): buffer
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	local minLog, maxLog = math.log10(math.abs(m1)) + e1, math.log10(math.abs(m2)) + e2
@@ -1768,43 +2171,73 @@ function Bnum.me(val1: any, val2: any): boolean
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -1824,43 +2257,73 @@ function Bnum.me(val1: any, val2: any): boolean
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if e1 ~= e2 then
@@ -1888,43 +2351,73 @@ function Bnum.eq(val1: any, val2: any): boolean
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -1944,43 +2437,73 @@ function Bnum.eq(val1: any, val2: any): boolean
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if e1 ~= e2 then
@@ -2008,43 +2531,73 @@ function Bnum.le(val1: any, val2: any): boolean
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -2064,43 +2617,73 @@ function Bnum.le(val1: any, val2: any): boolean
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if e1 ~= e2 then
@@ -2128,43 +2711,73 @@ function Bnum.meeq(val1: any, val2: any): boolean
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -2184,43 +2797,73 @@ function Bnum.meeq(val1: any, val2: any): boolean
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if e1 ~= e2 then
@@ -2248,43 +2891,73 @@ function Bnum.leeq(val1: any, val2: any): boolean
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val1, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val1, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant * 10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m1, e1 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m1, e1 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
@@ -2304,43 +2977,73 @@ function Bnum.leeq(val1: any, val2: any): boolean
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		local i, sign, mant, mantDigits, exp, frac = 1, 1, 0, 0, 0, false
-		local b = string.byte
-		if string.byte(val2, i) == 45 then sign = -1; i += 1
-		elseif string.byte(val2, i) == 43 then i += 1 end
-		while i <= len do
-			local c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then mant = mant*10 + (c-48); mantDigits += 1
-				else exp += 1 end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then i += 1; break
-			else break end
-			i += 1
-		end
-		if i <= len then
-			local esign = 1
-			local c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local e = 0
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				e = e*10 + (c-48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += e * esign
-		end
-		if mant == 0 then m2, e2 = 0,0
-		else
-			local m = mant * pow10[-(mantDigits-1)]
-			m2, e2 = sign * m, exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	if e1 ~= e2 then
@@ -2381,9 +3084,7 @@ function Bnum.abs(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -2393,39 +3094,51 @@ function Bnum.abs(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2471,9 +3184,7 @@ function Bnum.round(val: any, digits: number?): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -2483,39 +3194,51 @@ function Bnum.round(val: any, digits: number?): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2574,9 +3297,7 @@ function Bnum.ceil(val: any, digits: number?): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -2586,39 +3307,51 @@ function Bnum.ceil(val: any, digits: number?): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2668,13 +3401,14 @@ function Bnum.clamp(val: any, min: any, max: any): buffer
 		if len == 0 then
 			mV, eV = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local b = string.byte
-			local c = b(val, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val, i)
 				if c >= 48 and c <= 57 then
@@ -2682,38 +3416,51 @@ function Bnum.clamp(val: any, min: any, max: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				mV, eV = 0, 0
 			else
 				mV = sign * mant * pow10[-(mantDigits - 1)]
-				eV = exp + mantDigits - 1
+				eV = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2735,56 +3482,70 @@ function Bnum.clamp(val: any, min: any, max: any): buffer
 			end
 		end
 	elseif type(min) == "string" then
-		local len = #min
+		local len = #val
 		if len == 0 then
 			mMin, eMin = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local b = string.byte
-			local c = b(min, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = b(min, i)
+				c = b(val, i)
 				if c >= 48 and c <= 57 then
 					if mantDigits < 17 then
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(min, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(min, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				mMin, eMin = 0, 0
 			else
 				mMin = sign * mant * pow10[-(mantDigits - 1)]
-				eMin = exp + mantDigits - 1
+				eMin = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2806,56 +3567,70 @@ function Bnum.clamp(val: any, min: any, max: any): buffer
 			end
 		end
 	elseif type(max) == "string" then
-		local len = #max
+		local len = #val
 		if len == 0 then
 			mMax, eMax = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local b = string.byte
-			local c = b(max, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = b(max, i)
+				c = b(val, i)
 				if c >= 48 and c <= 57 then
 					if mantDigits < 17 then
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(max, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(max, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				mMax, eMax = 0, 0
 			else
 				mMax = sign * mant * pow10[-(mantDigits - 1)]
-				eMax = exp + mantDigits - 1
+				eMax = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -2906,9 +3681,7 @@ function Bnum.sqrt(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -2918,39 +3691,51 @@ function Bnum.sqrt(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -3006,9 +3791,7 @@ function Bnum.cbrt(val: any): buffer
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant = 0
-			local mantDigits = 0
-			local exp = 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -3018,39 +3801,51 @@ function Bnum.cbrt(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign = 1
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				local ee = 0
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				local mm = mant * pow10[-(mantDigits - 1)]
-				m, e = sign * mm, exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -3066,156 +3861,178 @@ function Bnum.cbrt(val: any): buffer
 	return out
 end
 
-function Bnum.root(val: any, n: any): buffer
+function Bnum.root(val1: any, val2: any): buffer
 	local out = buffer.create(12)
 	local m1: number, e1: number = 0/0, 0
 	local m2: number, e2: number = 0/0, 0
-	if type(val) == "buffer" then
-		m1, e1 = buffer.readf64(val, 0), buffer.readi32(val, 8)
-	elseif type(val) == "number" then
-		if val == 0 then
-			m1, e1 = 0, 0
-		elseif val ~= val then
-			m1, e1 = 0/0, 0
-		elseif val == math.huge then
-			m1, e1 = 1, math.huge
-		elseif val == -math.huge then
-			m1, e1 = -1, math.huge
+	if type(val1) == "buffer" then
+		m1, e1 = buffer.readf64(val1, 0), buffer.readi32(val1, 8)
+	elseif type(val1) == "number" then
+		if val1 == 0 then m1, e1 = 0,0
+		elseif val1 ~= val1 then m1, e1 = 0/0,0
+		elseif val1 == math.huge then m1, e1 = 1, math.huge
+		elseif val1 == -math.huge then m1, e1 = -1, math.huge
 		else
-			local a = math.abs(val)
-			if a >= 1e10 or a <= 1e-10 then
-				local ee = math.floor(math.log10(a))
-				m1, e1 = val / pow10[ee], ee
+			local absn = math.abs(val1)
+			if absn >= 1e10 or absn <= 1e-10 then
+				local e = math.floor(math.log10(absn))
+				m1, e1 = val1 / pow10[e], e
 			else
-				m1, e1 = val, 0
+				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val) == "string" then
-		local len = #val
+	elseif type(val1) == 'string' then
+		local len = #val1
+		local m, e
 		if len == 0 then
-			m1, e1 = 0/0, 0
+			m, e = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
-			local b = string.byte
-			local c = b(val, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = b(val, i)
+				c = b(val1, i)
 				if c >= 48 and c <= 57 then
 					if mantDigits < 17 then
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
-				m1, e1 = 0, 0
+				m, e = 0, 0
 			else
-				m1 = sign * mant * pow10[-(mantDigits - 1)]
-				e1 = exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
-	if type(n) == "buffer" then
-		m2, e2 = buffer.readf64(n, 0), buffer.readi32(n, 8)
-	elseif type(n) == "number" then
-		if n == 0 then
-			m2, e2 = 0, 0
-		elseif n ~= n then
-			m2, e2 = 0/0, 0
-		elseif n == math.huge then
-			m2, e2 = 1, math.huge
-		elseif n == -math.huge then
-			m2, e2 = -1, math.huge
+	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
+	if type(val2) == "buffer" then
+		m2, e2 = buffer.readf64(val2, 0), buffer.readi32(val2, 8)
+	elseif type(val2) == "number" then
+		if val2 == 0 then m2, e2 = 0,0
+		elseif val2 ~= val2 then m2, e2 = 0/0,0
+		elseif val2 == math.huge then m2, e2 = 1, math.huge
+		elseif val2 == -math.huge then m2, e2 = -1, math.huge
 		else
-			local a = math.abs(n)
-			if a >= 1e10 or a <= 1e-10 then
-				local ee = math.floor(math.log10(a))
-				m2, e2 = n / pow10[ee], ee
+			local absn = math.abs(val2)
+			if absn >= 1e10 or absn <= 1e-10 then
+				local e = math.floor(math.log10(absn))
+				m2, e2 = val2 / pow10[e], e
 			else
-				m2, e2 = n, 0
+				m2, e2 = val2, 0
 			end
 		end
-	elseif type(n) == "string" then
-		local len = #n
+	elseif type(val2) == 'string' then
+		local len = #val2
+		local m, e
 		if len == 0 then
-			m2, e2 = 0/0, 0
+			m, e = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
-			local b = string.byte
-
-			local c = b(n, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
-				c = b(n, i)
+				c = b(val2, i)
 				if c >= 48 and c <= 57 then
 					if mantDigits < 17 then
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(n, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(n, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
-				m2, e2 = 0, 0
+				m, e = 0, 0
 			else
-				m2 = sign * mant * pow10[-(mantDigits - 1)]
-				e2 = exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -3278,13 +4095,14 @@ function Bnum.floor(val: any): buffer
 		if len == 0 then
 			m, e = 0/0, 0
 		else
-			local i, sign = 1, 1
-			local b = string.byte
-			local c = b(val, i)
+			local i = 1
+			local sign = 1
+			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val, i)
 				if c >= 48 and c <= 57 then
@@ -3292,38 +4110,51 @@ function Bnum.floor(val: any): buffer
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
 				m = sign * mant * pow10[-(mantDigits - 1)]
-				e = exp + mantDigits - 1
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -3398,52 +4229,66 @@ function Bnum.min<T...>(...: T...): buffer
 			if len == 0 then
 				m, e = 0/0, 0
 			else
-				local i2, sign = 1, 1
-				local b = string.byte
-				local c = b(val, i2)
-				if c == 45 then sign = -1; i2 += 1
-				elseif c == 43 then i2 += 1 end
-				local mant, mantDigits, exp = 0, 0, 0
+				local i = 1
+				local sign = 1
+				local c = string.byte(val, i)
+				if c == 45 then sign = -1; i += 1
+				elseif c == 43 then i += 1 end
+				local mant, mantDigits, sexp = 0, 0, 0
 				local frac = false
-				while i2 <= len do
-					c = b(val, i2)
+				local b = string.byte
+				while i <= len do
+					c = b(val, i)
 					if c >= 48 and c <= 57 then
 						if mantDigits < 17 then
 							mant = mant * 10 + (c - 48)
 							mantDigits += 1
 						else
-							exp += 1
+							sexp += 1
 						end
-						if frac then exp -= 1 end
+						if frac then sexp -= 1 end
 					elseif c == 46 then
 						if frac then break end
 						frac = true
 					elseif c == 69 or c == 101 then
-						i2 += 1
 						break
 					else
 						break
 					end
-					i2 += 1
+					i += 1
 				end
-				if i2 <= len then
-					local esign, ee = 1, 0
-					c = b(val, i2)
-					if c == 45 then esign = -1; i2 += 1
-					elseif c == 43 then i2 += 1 end
-					while i2 <= len do
-						c = b(val, i2)
+				local function parseExp(idx)
+					local expVal, expSign = 0, 1
+					if idx > len then return 0, idx end
+					local c = b(val, idx)
+					if c == 45 then expSign = -1; idx += 1
+					elseif c == 43 then idx += 1 end
+					while idx <= len do
+						c = b(val, idx)
 						if c < 48 or c > 57 then break end
-						ee = ee * 10 + (c - 48)
-						i2 += 1
+						expVal = expVal * 10 + (c - 48)
+						idx += 1
 					end
-					exp += ee * esign
+					if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+						local innerExp, newIdx = parseExp(idx + 1)
+						expVal = expVal * 10^innerExp
+						idx = newIdx
+					end
+					return expVal * expSign, idx
+				end
+				while i <= len do
+					c = b(val, i)
+					if c ~= 69 and c ~= 101 then break end
+					i += 1
+					local expVal
+					expVal, i = parseExp(i)
+					sexp = expVal
 				end
 				if mant == 0 then
 					m, e = 0, 0
 				else
 					m = sign * mant * pow10[-(mantDigits - 1)]
-					e = exp + mantDigits - 1
+					e = sexp + mantDigits - 1
 				end
 			end
 		else
@@ -3497,52 +4342,66 @@ function Bnum.max<T...>(...: T...): buffer
 			if len == 0 then
 				m, e = 0/0, 0
 			else
-				local i2, sign = 1, 1
-				local b = string.byte
-				local c = b(val, i2)
-				if c == 45 then sign = -1; i2 += 1
-				elseif c == 43 then i2 += 1 end
-				local mant, mantDigits, exp = 0, 0, 0
+				local i = 1
+				local sign = 1
+				local c = string.byte(val, i)
+				if c == 45 then sign = -1; i += 1
+				elseif c == 43 then i += 1 end
+				local mant, mantDigits, sexp = 0, 0, 0
 				local frac = false
-				while i2 <= len do
-					c = b(val, i2)
+				local b = string.byte
+				while i <= len do
+					c = b(val, i)
 					if c >= 48 and c <= 57 then
 						if mantDigits < 17 then
 							mant = mant * 10 + (c - 48)
 							mantDigits += 1
 						else
-							exp += 1
+							sexp += 1
 						end
-						if frac then exp -= 1 end
+						if frac then sexp -= 1 end
 					elseif c == 46 then
 						if frac then break end
 						frac = true
 					elseif c == 69 or c == 101 then
-						i2 += 1
 						break
 					else
 						break
 					end
-					i2 += 1
+					i += 1
 				end
-				if i2 <= len then
-					local esign, ee = 1, 0
-					c = b(val, i2)
-					if c == 45 then esign = -1; i2 += 1
-					elseif c == 43 then i2 += 1 end
-					while i2 <= len do
-						c = b(val, i2)
+				local function parseExp(idx)
+					local expVal, expSign = 0, 1
+					if idx > len then return 0, idx end
+					local c = b(val, idx)
+					if c == 45 then expSign = -1; idx += 1
+					elseif c == 43 then idx += 1 end
+					while idx <= len do
+						c = b(val, idx)
 						if c < 48 or c > 57 then break end
-						ee = ee * 10 + (c - 48)
-						i2 += 1
+						expVal = expVal * 10 + (c - 48)
+						idx += 1
 					end
-					exp += ee * esign
+					if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+						local innerExp, newIdx = parseExp(idx + 1)
+						expVal = expVal * 10^innerExp
+						idx = newIdx
+					end
+					return expVal * expSign, idx
+				end
+				while i <= len do
+					c = b(val, i)
+					if c ~= 69 and c ~= 101 then break end
+					i += 1
+					local expVal
+					expVal, i = parseExp(i)
+					sexp = expVal
 				end
 				if mant == 0 then
 					m, e = 0, 0
 				else
 					m = sign * mant * pow10[-(mantDigits - 1)]
-					e = exp + mantDigits - 1
+					e = sexp + mantDigits - 1
 				end
 			end
 		else
@@ -3567,133 +4426,172 @@ function Bnum.mod(val1: any, val2: any): buffer
 	if type(val1) == "buffer" then
 		m1, e1 = buffer.readf64(val1, 0), buffer.readi32(val1, 8)
 	elseif type(val1) == "number" then
-		if val1 == 0 then m1, e1 = 0, 0
-		elseif val1 ~= val1 then m1, e1 = 0/0, 0
+		if val1 == 0 then m1, e1 = 0,0
+		elseif val1 ~= val1 then m1, e1 = 0/0,0
 		elseif val1 == math.huge then m1, e1 = 1, math.huge
 		elseif val1 == -math.huge then m1, e1 = -1, math.huge
 		else
 			local absn = math.abs(val1)
 			if absn >= 1e10 or absn <= 1e-10 then
-				local ee = math.floor(math.log10(absn))
-				m1, e1 = val1 / pow10[ee], ee
+				local e = math.floor(math.log10(absn))
+				m1, e1 = val1 / pow10[e], e
 			else
 				m1, e1 = val1, 0
 			end
 		end
-	elseif type(val1) == "string" then
+	elseif type(val1) == 'string' then
 		local len = #val1
-		if len == 0 then m1, e1 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val1, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant, mantDigits, exp = 0, 0, 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val1, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign, ee = 1, 0
-			c = b(val1, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val1, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val1, i)
-				if c < 48 or c > 57 then break end
-				ee = ee * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += ee * esign
-		end
-		if mant == 0 then m1, e1 = 0, 0
-		else
-			m1, e1 = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
+	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
 	if type(val2) == "buffer" then
 		m2, e2 = buffer.readf64(val2, 0), buffer.readi32(val2, 8)
 	elseif type(val2) == "number" then
-		if val2 == 0 then error("Bnum.mod: division by zero")
-		elseif val2 ~= val2 then m2, e2 = 0/0, 0
+		if val2 == 0 then m2, e2 = 0,0
+		elseif val2 ~= val2 then m2, e2 = 0/0,0
 		elseif val2 == math.huge then m2, e2 = 1, math.huge
 		elseif val2 == -math.huge then m2, e2 = -1, math.huge
 		else
 			local absn = math.abs(val2)
 			if absn >= 1e10 or absn <= 1e-10 then
-				local ee = math.floor(math.log10(absn))
-				m2, e2 = val2 / pow10[ee], ee
+				local e = math.floor(math.log10(absn))
+				m2, e2 = val2 / pow10[e], e
 			else
 				m2, e2 = val2, 0
 			end
 		end
-	elseif type(val2) == "string" then
+	elseif type(val2) == 'string' then
 		local len = #val2
-		if len == 0 then m2, e2 = 0/0, 0 end
-		local i = 1
-		local sign = 1
-		local c = string.byte(val2, i)
-		if c == 45 then sign = -1; i += 1
-		elseif c == 43 then i += 1 end
-		local mant, mantDigits, exp = 0, 0, 0
-		local frac = false
-		local b = string.byte
-		while i <= len do
-			c = b(val2, i)
-			if c >= 48 and c <= 57 then
-				if mantDigits < 17 then
-					mant = mant * 10 + (c - 48)
-					mantDigits += 1
-				else
-					exp += 1
-				end
-				if frac then exp -= 1 end
-			elseif c == 46 then
-				if frac then break end
-				frac = true
-			elseif c == 69 or c == 101 then
-				i += 1
-				break
-			else
-				break
-			end
-			i += 1
-		end
-		if i <= len then
-			local esign, ee = 1, 0
-			c = b(val2, i)
-			if c == 45 then esign = -1; i += 1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
+		else
+			local i = 1
+			local sign = 1
+			local c = string.byte(val2, i)
+			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
+			local mant, mantDigits, sexp = 0, 0, 0
+			local frac = false
+			local b = string.byte
 			while i <= len do
 				c = b(val2, i)
-				if c < 48 or c > 57 then break end
-				ee = ee * 10 + (c - 48)
+				if c >= 48 and c <= 57 then
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
+				elseif c == 46 then
+					if frac then break end
+					frac = true
+				elseif c == 69 or c == 101 then
+					break
+				else
+					break
+				end
 				i += 1
 			end
-			exp += ee * esign
-		end
-		if mant == 0 then m2, e2 = 0, 0
-		else
-			m2, e2 = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
+					if c < 48 or c > 57 then break end
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
+				end
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
+			end
 		end
 	end
 	local de = e1 - e2
@@ -3759,7 +4657,7 @@ function Bnum.modf(val: any): (buffer, buffer)
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
@@ -3769,37 +4667,51 @@ function Bnum.modf(val: any): (buffer, buffer)
 						mant = mant * 10 + (c - 48)
 						mantDigits += 1
 					else
-						exp += 1
+						sexp += 1
 					end
-					if frac then exp -= 1 end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				m, e = 0, 0
 			else
-				m, e = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -3834,124 +4746,177 @@ function Bnum.modf(val: any): (buffer, buffer)
 	return intBuf, fracBuf
 end
 
-function Bnum.fmod(n1: any, n2: any): buffer
+function Bnum.fmod(val1: any, val2: any): buffer
 	local m1: number, e1: number, m2: number, e2: number
 	local out = buffer.create(12)
-	if type(n1) == "buffer" then
-		m1, e1 = buffer.readf64(n1, 0), buffer.readi32(n1, 8)
-	elseif type(n1) == "number" then
-		if n1 == 0 then m1, e1 = 0, 0
+	if type(val1) == "buffer" then
+		m1, e1 = buffer.readf64(val1, 0), buffer.readi32(val1, 8)
+	elseif type(val1) == "number" then
+		if val1 == 0 then m1, e1 = 0,0
+		elseif val1 ~= val1 then m1, e1 = 0/0,0
+		elseif val1 == math.huge then m1, e1 = 1, math.huge
+		elseif val1 == -math.huge then m1, e1 = -1, math.huge
 		else
-			local absn = math.abs(n1)
+			local absn = math.abs(val1)
 			if absn >= 1e10 or absn <= 1e-10 then
-				e1 = math.floor(math.log10(absn))
-				m1 = n1 / pow10[e1]
+				local e = math.floor(math.log10(absn))
+				m1, e1 = val1 / pow10[e], e
 			else
-				m1, e1 = n1, 0
+				m1, e1 = val1, 0
 			end
 		end
-	elseif type(n1) == "string" then
-		local len = #n1
-		if len == 0 then m1, e1 = 0/0, 0
+	elseif type(val1) == 'string' then
+		local len = #val1
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
 		else
 			local i = 1
 			local sign = 1
-			local c = string.byte(n1, i)
+			local c = string.byte(val1, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
-				c = b(n1, i)
+				c = b(val1, i)
 				if c >= 48 and c <= 57 then
-					if mantDigits < 17 then mant = mant * 10 + (c - 48); mantDigits += 1
-					else exp += 1 end
-					if frac then exp -= 1 end
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(n1, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(n1, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val1, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val1, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val1, idx) == 69 or b(val1, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
 			end
-			if mant == 0 then m1, e1 = 0, 0
-			else m1, e1 = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			while i <= len do
+				c = b(val1, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
-	if type(n2) == "buffer" then
-		m2, e2 = buffer.readf64(n2, 0), buffer.readi32(n2, 8)
-	elseif type(n2) == "number" then
-		if n2 == 0 then error("Bnum.fmod: division by zero") end
-		local absn = math.abs(n2)
-		if absn >= 1e10 or absn <= 1e-10 then
-			e2 = math.floor(math.log10(absn))
-			m2 = n2 / pow10[e2]
+	if m1 == nil or e1 == nil then m1, e1 = 0,0 end
+	if type(val2) == "buffer" then
+		m2, e2 = buffer.readf64(val2, 0), buffer.readi32(val2, 8)
+	elseif type(val2) == "number" then
+		if val2 == 0 then m2, e2 = 0,0
+		elseif val2 ~= val2 then m2, e2 = 0/0,0
+		elseif val2 == math.huge then m2, e2 = 1, math.huge
+		elseif val2 == -math.huge then m2, e2 = -1, math.huge
 		else
-			m2, e2 = n2, 0
+			local absn = math.abs(val2)
+			if absn >= 1e10 or absn <= 1e-10 then
+				local e = math.floor(math.log10(absn))
+				m2, e2 = val2 / pow10[e], e
+			else
+				m2, e2 = val2, 0
+			end
 		end
-	elseif type(n2) == "string" then
-		local len = #n2
-		if len == 0 then m2, e2 = 0/0, 0
+	elseif type(val2) == 'string' then
+		local len = #val2
+		local m, e
+		if len == 0 then
+			m, e = 0/0, 0
 		else
 			local i = 1
 			local sign = 1
-			local c = string.byte(n2, i)
+			local c = string.byte(val2, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
-				c = b(n2, i)
+				c = b(val2, i)
 				if c >= 48 and c <= 57 then
-					if mantDigits < 17 then mant = mant * 10 + (c - 48); mantDigits += 1
-					else exp += 1 end
-					if frac then exp -= 1 end
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(n2, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(n2, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val2, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val2, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val2, idx) == 69 or b(val2, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
 			end
-			if mant == 0 then m2, e2 = 0, 0
-			else m2, e2 = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			while i <= len do
+				c = b(val2, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -4005,48 +4970,69 @@ function Bnum.slog(val: any): buffer
 		end
 	elseif type(val) == "string" then
 		local len = #val
-		if len == 0 then m, e = 0/0, 0
+		if len == 0 then
+			m, e = 0/0, 0
 		else
 			local i = 1
 			local sign = 1
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
 				c = b(val, i)
 				if c >= 48 and c <= 57 then
-					if mantDigits < 17 then mant = mant * 10 + (c - 48); mantDigits += 1
-					else exp += 1 end
-					if frac then exp -= 1 end
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				exp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
 			end
-			if mant == 0 then m, e = 0, 0
-			else m, e = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
+			end
+			if mant == 0 then
+				m, e = 0, 0
+			else
+				m = sign * mant * pow10[-(mantDigits - 1)]
+				e = sexp + mantDigits - 1
 			end
 		end
 	end
@@ -4085,7 +5071,7 @@ function Bnum.lbencode(val: any): number
 		if val == 0 then
 			buffer.writef64(out, 0, 0)
 			buffer.writei32(out, 8, 0)
-			return out
+			return 0
 		end
 		local absn = math.abs(val)
 		if absn >= 1e10 or absn <= 1e-10 then
@@ -4121,25 +5107,38 @@ function Bnum.lbencode(val: any): number
 					if frac then break end
 					frac = true
 				elseif c == 69 or c == 101 then
-					i += 1
 					break
 				else
 					break
 				end
 				i += 1
 			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
+			local function parseExp(idx)
+				local expVal, expSign = 0, 1
+				if idx > len then return 0, idx end
+				local c = b(val, idx)
+				if c == 45 then expSign = -1; idx += 1
+				elseif c == 43 then idx += 1 end
+				while idx <= len do
+					c = b(val, idx)
 					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
+					expVal = expVal * 10 + (c - 48)
+					idx += 1
 				end
-				sexp += ee * esign
+				if idx <= len and (b(val, idx) == 69 or b(val, idx) == 101) then
+					local innerExp, newIdx = parseExp(idx + 1)
+					expVal = expVal * 10^innerExp
+					idx = newIdx
+				end
+				return expVal * expSign, idx
+			end
+			while i <= len do
+				c = b(val, i)
+				if c ~= 69 and c ~= 101 then break end
+				i += 1
+				local expVal
+				expVal, i = parseExp(i)
+				sexp = expVal
 			end
 			if mant == 0 then
 				man, exp = 0, 0
@@ -4175,30 +5174,6 @@ function Bnum.lbdecode(val: number): buffer
 	return out
 end
 
-function Bnum.encodeData(val: any, oldData: any): buffer
-	local newBuff = Bnum.lbencode(val)
-	if not oldData then return newBuff end
-	local manNew, expNew = buffer.readf64(newBuff, 0), buffer.readi32(newBuff, 8)
-	local manOld, expOld = buffer.readf64(oldData, 0), buffer.readi32(oldData, 8)
-	local useOld
-	if expOld > expNew then
-		useOld = true
-	elseif expOld < expNew then
-		useOld = false
-	else
-		useOld = manOld >= manNew
-	end
-	local out = buffer.create(12)
-	if useOld then
-		buffer.writef64(out, 0, manOld)
-		buffer.writei32(out, 8, expOld)
-	else
-		buffer.writef64(out, 0, manNew)
-		buffer.writei32(out, 8, expNew)
-	end
-	return out
-end
-
 function Bnum.Comma(val: any, digits: number?): string
 	digits = digits or 2
 	if type(val) ~= "number" then
@@ -4228,7 +5203,7 @@ function Bnum.format(val: any, digits: number?): string
 	if type(val) == "buffer" then
 		m, e = buffer.readf64(val, 0), buffer.readi32(val, 8)
 	elseif type(val) == "number" then
-		if val == 0 then return "0" end
+		if val == 0 then m, e = 0, 0 end
 		local absn = math.abs(val)
 		if absn >= 1e10 or absn <= 1e-10 then
 			e = math.floor(math.log10(absn))
@@ -4237,57 +5212,19 @@ function Bnum.format(val: any, digits: number?): string
 			m, e = val, 0
 		end
 	elseif type(val) == "string" then
-		local len = #val
-		if len == 0 then m, e = 0/0, 0
-		else
-			local i = 1
-			local sign = 1
-			local c = string.byte(val, i)
-			if c == 45 then sign = -1; i += 1
-			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
-			local frac = false
-			local b = string.byte
-			while i <= len do
-				c = b(val, i)
-				if c >= 48 and c <= 57 then
-					if mantDigits < 17 then mant = mant * 10 + (c - 48); mantDigits += 1
-					else exp += 1 end
-					if frac then exp -= 1 end
-				elseif c == 46 then
-					if frac then break end
-					frac = true
-				elseif c == 69 or c == 101 then
-					i += 1
-					break
-				else
-					break
-				end
-				i += 1
-			end
-			if i <= len then
-				local esign, ee = 1, 0
-				c = b(val, i)
-				if c == 45 then esign = -1; i += 1
-				elseif c == 43 then i += 1 end
-				while i <= len do
-					c = b(val, i)
-					if c < 48 or c > 57 then break end
-					ee = ee * 10 + (c - 48)
-					i += 1
-				end
-				exp += ee * esign
-			end
-			if mant == 0 then m, e = 0, 0
-			else m, e = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
-			end
-		end
+		local fromStr = Bnum.fromString(val)
+		m, e = buffer.readf64(val, 0), buffer.readi32(val, 8)
 	else
 		error("Bnum.format: invalid type")
 	end
 	if m ~= m then return "NaN" end
 	if e == math.huge then return m >= 0 and "Inf" or "-Inf" end
 	if m == 0 then return "0" end
+	if e >= 1e20 then
+		local eE = math.floor(math.log10(e))
+		local mE = e/10^eE
+		return m .. 'e' .. mE .. 'e' .. eE
+	end
 	if e < 3000 then
 		if e <= -3 then
 			local index = math.floor(-e / 3)
