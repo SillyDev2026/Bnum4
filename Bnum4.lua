@@ -4075,11 +4075,12 @@ end
 local scale = 1e6
 local zero = 4e18
 
-function Bnum.lbencode(val: any): buffer
-	local m: number, e: number
+function Bnum.lbencode(val: any): number
+	local man: number, exp: number
 	local out = buffer.create(12)
 	if type(val) == "buffer" then
-		m, e = buffer.readf64(val, 0), buffer.readi32(val, 8)
+		man = buffer.readf64(val, 0)
+		exp = buffer.readi32(val, 8)
 	elseif type(val) == "number" then
 		if val == 0 then
 			buffer.writef64(out, 0, 0)
@@ -4088,29 +4089,34 @@ function Bnum.lbencode(val: any): buffer
 		end
 		local absn = math.abs(val)
 		if absn >= 1e10 or absn <= 1e-10 then
-			e = math.floor(math.log10(absn))
-			m = val / pow10[e]
+			exp = math.floor(math.log10(absn))
+			man = val / pow10[exp]
 		else
-			m, e = val, 0
+			man, exp = val, 0
 		end
 	elseif type(val) == "string" then
 		local len = #val
-		if len == 0 then m, e = 0/0, 0
+		if len == 0 then
+			man, exp = 0/0, 0
 		else
 			local i = 1
 			local sign = 1
 			local c = string.byte(val, i)
 			if c == 45 then sign = -1; i += 1
 			elseif c == 43 then i += 1 end
-			local mant, mantDigits, exp = 0, 0, 0
+			local mant, mantDigits, sexp = 0, 0, 0
 			local frac = false
 			local b = string.byte
 			while i <= len do
 				c = b(val, i)
 				if c >= 48 and c <= 57 then
-					if mantDigits < 17 then mant = mant * 10 + (c - 48); mantDigits += 1
-					else exp += 1 end
-					if frac then exp -= 1 end
+					if mantDigits < 17 then
+						mant = mant * 10 + (c - 48)
+						mantDigits += 1
+					else
+						sexp += 1
+					end
+					if frac then sexp -= 1 end
 				elseif c == 46 then
 					if frac then break end
 					frac = true
@@ -4133,41 +4139,37 @@ function Bnum.lbencode(val: any): buffer
 					ee = ee * 10 + (c - 48)
 					i += 1
 				end
-				exp += ee * esign
+				sexp += ee * esign
 			end
-			if mant == 0 then m, e = 0, 0
-			else m, e = sign * mant * pow10[-(mantDigits-1)], exp + mantDigits - 1
+			if mant == 0 then
+				man, exp = 0, 0
+			else
+				man = sign * mant * pow10[-(mantDigits - 1)]
+				exp = sexp + mantDigits - 1
 			end
 		end
 	else
 		error("Bnum.lbencode: invalid type")
 	end
-	buffer.writef64(out, 0, m)
-	buffer.writei32(out, 8, e)
-	return out
+	if man == 0 then return 	4e18 end
+	local sign = math.sign(man)
+	man = math.abs(man)
+	local expLog = math.log10(exp+1)
+	local expInt = math.floor(expLog*scale+0.5)
+	local manLog = math.log10(man)
+	local manInt = math.floor(manLog*scale+0.5)
+	return sign * (expInt * 1e6 + manInt)
 end
 
-function Bnum.lbdecode(encodedBuf: buffer): buffer
+function Bnum.lbdecode(val: number): buffer
+	if val == 4e18 then return Bnum.zero end
+	local sign = (val < 0) and -1 or 1
+	val = math.abs(val)
+	local expPart = math.floor(val/1e6)
+	local manPart = val % 1e6
+	local exp = math.floor(10^(expPart / scale) - 1+0.001)
+	local man = 10^(manPart / scale)
 	local out = buffer.create(12)
-	local man = buffer.readf64(encodedBuf, 0)
-	local exp = buffer.readi32(encodedBuf, 8)
-	if man == 0 and exp == 0 then
-		buffer.writef64(out, 0, 0)
-		buffer.writei32(out, 8, 0)
-		return out
-	end
-	if man ~= 0 then
-		local absMan = math.abs(man)
-		if absMan >= 10 then
-			local delta = math.floor(math.log10(absMan))
-			man = man / pow10[delta]
-			exp = exp + delta
-		elseif absMan < 1 then
-			local delta = math.floor(math.log10(absMan))
-			man = man / pow10[delta]
-			exp = exp + delta
-		end
-	end
 	buffer.writef64(out, 0, man)
 	buffer.writei32(out, 8, exp)
 	return out
@@ -4320,11 +4322,8 @@ function Bnum.format(val: any, digits: number?): string
 			return scaled .. firstset[a + 1] .. second[b + 1] .. third[c + 1]
 		end
 	end
-	local eMan: number, eExp: number = e, 0
-	if eMan >= 1e10 then
-		eExp = math.floor(math.log10(eMan))
-		eMan = eMan / pow10[eExp]
-	end
+	local eExp = math.floor(math.log10(e))
+	local eMan = e / 10^eExp
 	local expStr
 	if eExp < 3 then
 		expStr = string.format("%.":: string .. digits:: number .. "f":: string, eMan:: number * pow10[eExp]:: number):: any
